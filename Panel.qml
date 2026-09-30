@@ -14,6 +14,7 @@ Panel {
   property string hostText: ""
   property string portText: "443"
   property string usernameText: ""
+  property string realmText: ""
   property string passwordText: ""
   property string otpText: ""
 
@@ -48,6 +49,7 @@ Panel {
       hostText = service.host
       portText = service.port
       usernameText = service.username
+      realmText = service.realm
       passwordText = ""
       otpText = ""
       service.refresh()
@@ -92,7 +94,7 @@ Panel {
 
   Connections {
     target: service
-    function onDetailsSaved(h, p, u) { root.persist({ host: h, port: p, username: u }) }
+    function onDetailsSaved(h, p, u, r) { root.persist({ host: h, port: p, username: u, realm: r }); root.hostText = h; root.portText = p; root.usernameText = u; root.realmText = r }
     function onPasswordSaved() { root.persist({ hasPassword: true }); root.passwordText = "" }
     function onPasswordForgotten() { root.persist({ hasPassword: false }) }
     function onCertTrusted(digest) { root.persist({ trustedCertDigest: digest }) }
@@ -154,7 +156,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: hostField.activeFocus || portField.activeFocus || usernameField.activeFocus ||
-        passwordField.activeFocus || otpField.activeFocus || service.pendingTrustDigest !== ""
+        realmField.activeFocus || passwordField.activeFocus || otpField.activeFocus || service.pendingTrustDigest !== ""
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -267,7 +269,7 @@ Panel {
             TextField {
               id: hostField
               width: parent.width
-              placeholderText: "Gateway host (vpn.example.com)"
+              placeholderText: "Gateway host(s) (e.g. host1, host2)"
               text: root.hostText
               foreground: root.foreground
               horizontalPadding: Style.spacing.controlGap
@@ -310,6 +312,19 @@ Panel {
                 Keys.onEscapePressed: keyCatcher.forceActiveFocus()
               }
             }
+            TextField {
+              id: realmField
+              width: parent.width
+              placeholderText: "Realm (e.g. vendor, optional)"
+              text: root.realmText
+              foreground: root.foreground
+              horizontalPadding: Style.spacing.controlGap
+              verticalPadding: Style.spacing.controlPaddingY
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              onTextChanged: root.realmText = text
+              Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+            }
 
             Row {
               width: parent.width
@@ -321,12 +336,12 @@ Panel {
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 enabled: service.canConfigure && root.hostText.trim() !== "" && root.usernameText.trim() !== ""
-                onClicked: service.saveConnectionDetails(root.hostText, root.portText, root.usernameText)
+                onClicked: service.saveConnectionDetails(root.hostText, root.portText, root.usernameText, root.realmText)
               }
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Save host / port / username"
+                text: "Save connection details"
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall

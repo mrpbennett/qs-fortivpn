@@ -11,6 +11,92 @@ function sanitizeField(value) {
   return String(value == null ? "" : value).replace(/[\r\n]/g, "").trim()
 }
 
+function isValidHost(h) {
+  if (!h || h.length > 255) return false
+  return /^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(h) && !/\.\./.test(h)
+}
+
+function isValidPort(p) {
+  if (!/^[0-9]{1,5}$/.test(p)) return false
+  var num = parseInt(p, 10)
+  return num >= 1 && num <= 65535
+}
+
+var MAX_GATEWAYS = 5
+
+// Normalizes one or more gateway hosts (comma/space/semicolon-delimited),
+// stripping protocol prefixes, preserving per-gateway ports, and validating
+// host syntax. Returns { hosts, port, realm, error } — caller must check error.
+function parseGateways(rawHost, defaultPort) {
+  var raw = sanitizeField(rawHost)
+  var items = raw.split(/[,;\s]+/)
+  var cleaned = []
+  var fallbackPort = defaultPort || "443"
+  var detectedRealm = ""
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i].trim()
+    if (!item) continue
+    var original = item
+    // Reject unsupported protocols (only http:// and https:// are accepted as prefixes).
+    if (item.indexOf("://") !== -1) {
+      if (item.startsWith("https://")) item = item.substring(8)
+      else if (item.startsWith("http://")) item = item.substring(7)
+      else {
+        return { hosts: "", port: fallbackPort, realm: "", error: "Unsupported protocol in gateway: " + original }
+      }
+    }
+    // Accept at most one path segment as realm (e.g. /vendor); reject /realm/extra.
+    if (item.indexOf("/") !== -1) {
+      var slashParts = item.split("/")
+      if (slashParts.length > 2) {
+        return { hosts: "", port: fallbackPort, realm: "", error: "Malformed gateway entry: " + original }
+      }
+      item = slashParts[0]
+      if (!detectedRealm && slashParts[1]) detectedRealm = sanitizeField(slashParts[1])
+    }
+
+    var hostPart = item
+    var portPart = ""
+    var colons = item.split(":")
+    if (colons.length > 2) {
+      return { hosts: "", port: fallbackPort, realm: "", error: "Malformed gateway entry: " + original }
+    }
+    if (colons.length === 2) {
+      hostPart = colons[0]
+      portPart = colons[1]
+    }
+
+    if (!isValidHost(hostPart)) {
+      return { hosts: "", port: fallbackPort, realm: "", error: "Invalid gateway host: " + original }
+    }
+
+    if (portPart !== "") {
+      if (!isValidPort(portPart)) {
+        return { hosts: "", port: fallbackPort, realm: "", error: "Invalid port in gateway: " + original }
+      }
+      var hostEntry = hostPart + ":" + portPart
+    } else {
+      var hostEntry = hostPart
+    }
+
+    if (cleaned.indexOf(hostEntry) === -1) {
+      cleaned.push(hostEntry)
+    }
+  }
+
+  if (cleaned.length > MAX_GATEWAYS) {
+    return { hosts: "", port: fallbackPort, realm: "", error: "Too many gateways (max " + MAX_GATEWAYS + ")." }
+  }
+
+  return {
+    hosts: cleaned.join(", "),
+    port: fallbackPort,
+    realm: detectedRealm,
+    error: ""
+  }
+}
+
 // Secrets may legitimately begin or end with whitespace. Newlines are still
 // forbidden because config writes use one stdin line per value.
 function sanitizeSecret(value) {

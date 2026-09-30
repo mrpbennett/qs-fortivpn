@@ -32,6 +32,7 @@ Item {
   readonly property string host: setting("host", "")
   readonly property string port: setting("port", "443")
   readonly property string username: setting("username", "")
+  readonly property string realm: setting("realm", "")
   readonly property bool hasPassword: setting("hasPassword", false) === true
   readonly property string trustedCertDigest: setting("trustedCertDigest", "")
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 5, 2, 60)
@@ -48,7 +49,7 @@ Item {
 
   signal passwordSaved()
   signal passwordForgotten()
-  signal detailsSaved(string host, string port, string username)
+  signal detailsSaved(string host, string port, string username, string realm)
   signal certTrusted(string digest)
 
   property string _pendingOtp: ""
@@ -130,18 +131,26 @@ Item {
     })
   }
 
-  function saveConnectionDetails(hostValue, portValue, usernameValue) {
+  function saveConnectionDetails(hostValue, portValue, usernameValue, realmValue) {
     if (!canConfigure) return
-    var h = Model.sanitizeField(hostValue)
-    var p = Model.sanitizeField(portValue) || "443"
+    var parsed = Model.parseGateways(hostValue, Model.sanitizeField(portValue))
+    if (parsed.error) {
+      lastError = parsed.error
+      return
+    }
+    var h = parsed.hosts
+    var p = parsed.port || "443"
     var u = Model.sanitizeField(usernameValue)
+    var r = Model.sanitizeField(realmValue) || parsed.realm
     if (h === "" || u === "") {
       lastError = "Host and username are required."
       return
     }
     actionStatus = "Saving connection details…"
-    _runWrite(["host", "port", "username"], [h, p, u], function() {
-      root.detailsSaved(h, p, u)
+    var keys = ["host", "port", "username", "realm"]
+    var values = [h, p, u, r]
+    _runWrite(keys, values, function() {
+      root.detailsSaved(h, p, u, r)
       root.actionStatus = "Connection details saved."
     })
   }

@@ -108,9 +108,63 @@ write_config() {
 
   for i in "${!keys[@]}"; do
     case ${keys[i]} in
+      host)
+        IFS=',; ' read -r -a _check_hosts <<< "${values[i]}"
+        _valid_count=0
+        _normalized=()
+        _extracted_realm=""
+        for _h in "${_check_hosts[@]}"; do
+          [[ -n "$_h" ]] || continue
+          _orig_h="$_h"
+          # Reject unsupported URL schemes (only http/https allowed as prefix).
+          if [[ $_h == *"://"* ]]; then
+            if [[ $_h == https://* ]]; then _h=${_h#https://}
+            elif [[ $_h == http://* ]]; then _h=${_h#http://}
+            else fail "Unsupported protocol in gateway: $_orig_h"
+            fi
+          fi
+          # At most one path segment allowed as realm (e.g. /vendor); reject /realm/extra.
+          if [[ $_h == *"/"* ]]; then
+            _slash_count=${_h//[^\/]/}
+            [[ ${#_slash_count} -le 1 ]] || fail "Malformed gateway entry: $_orig_h"
+            if [[ -z "$_extracted_realm" ]]; then
+              _extracted_realm="${_h#*/}"
+            fi
+            _h=${_h%%/*}
+          fi
+          # Reject entries with more than one colon (e.g. host:443:garbage)
+          local _colon_count=${_h//[^:]/}
+          [[ ${#_colon_count} -le 1 ]] || fail "Malformed gateway entry: $_orig_h"
+          _th="${_h%%:*}"
+          _tp="${_h##*:}"
+          [[ $_th =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ && ! $_th =~ \.\. ]] ||
+            fail "Invalid gateway host: $_orig_h"
+          if [[ "$_th" != "$_tp" ]]; then
+            [[ $_tp =~ ^[0-9]{1,5}$ ]] && (( 10#$_tp >= 1 && 10#$_tp <= 65535 )) ||
+              fail "Invalid port in gateway: $_orig_h"
+          fi
+          _normalized+=("$_h")
+          (( _valid_count++ )) || true
+        done
+        [[ $_valid_count -ge 1 ]] || fail "At least one gateway host is required."
+        [[ $_valid_count -le 5 ]] || fail "Too many gateways (max 5)."
+        # Persist normalized hosts (protocols/paths stripped).
+        values[i]=$(IFS=', '; echo "${_normalized[*]}")
+        # If realm was extracted from URL path and a realm key is present, fill it.
+        if [[ -n "$_extracted_realm" ]]; then
+          for _ri in "${!keys[@]}"; do
+            if [[ ${keys[_ri]} == "realm" && -z "${values[_ri]}" ]]; then
+              values[_ri]="$_extracted_realm"
+            fi
+          done
+        fi
+        ;;
       port)
         [[ ${values[i]} =~ ^[0-9]{1,5}$ ]] || fail "Port must be a number between 1 and 65535."
         (( 10#${values[i]} >= 1 && 10#${values[i]} <= 65535 )) || fail "Port must be a number between 1 and 65535."
+        ;;
+      realm)
+        [[ -z ${values[i]} || ${values[i]} =~ ^[a-zA-Z0-9._-]+$ ]] || fail "Realm must contain only letters, digits, hyphens, underscores, or dots."
         ;;
       trusted-cert)
         [[ -z ${values[i]} || ${values[i]} =~ ^[[:xdigit:]]{64}$ ]] || fail "Trusted certificate must be a SHA-256 digest."
@@ -135,7 +189,7 @@ case "${1:-}" in
   write)
     shift
     case "$*" in
-      "host port username"|"password"|"trusted-cert") write_config "$@" ;;
+      "host port username"|"host port username realm"|"realm"|"password"|"trusted-cert") write_config "$@" ;;
       *) fail "Unsupported FortiVPN configuration update." ;;
     esac
     ;;
@@ -157,13 +211,66 @@ case "${1:-}" in
     validate_config
     systemctl reset-failed "$UNIT.service" >/dev/null 2>&1 || true
     vpn=$(command -v openfortivpn) || fail "openfortivpn is not installed."
-    args=(systemd-run --system "--unit=$UNIT" --property=Type=notify --description=Omarchy\ FortiVPN "$vpn" -c "$CONF")
+    port=$(grep -E '^[[:space:]]*port[[:space:]]*=' "$CONF" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+    port=${port:-443}
+
+    raw_hosts=$(grep -E '^[[:space:]]*host[[:space:]]*=' "$CONF" 2>/dev/null | cut -d= -f2-)
+    cleaned_hosts=$(printf '%s\n' "$raw_hosts" | tr ',;' ' ')
+    read -r -a host_list <<< "$cleaned_hosts"
+
+    if [[ ${#host_list[@]} -gt 5 ]]; then
+      fail "Too many gateways configured (max 5)."
+    fi
+    if [[ ${#host_list[@]} -gt 1 ]]; then
+      # Overall probe deadline (seconds) so a long unreachable list
+      # cannot delay connection startup indefinitely.
+      probe_deadline=$(( $(date +%s) + 8 ))
+      for h in "${host_list[@]}"; do
+        [[ -n "$h" ]] || continue
+        (( $(date +%s) < probe_deadline )) || break
+        target_h="${h%%:*}"
+        target_p="${h##*:}"
+        [[ "$target_h" == "$target_p" ]] && target_p="$port"
+        [[ $target_h =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ && ! $target_h =~ \.\. ]] || continue
+        [[ $target_p =~ ^[0-9]{1,5}$ ]] && (( 10#$target_p >= 1 && 10#$target_p <= 65535 )) || continue
+        if timeout 1.5 bash -c 'cat < /dev/null > "/dev/tcp/$1/$2"' _ "$target_h" "$target_p" 2>/dev/null; then
+          selected_target="$target_h:$target_p"
+          break
+        fi
+      done
+      if [[ -z "$selected_target" && ${#host_list[@]} -gt 0 ]]; then
+        first_h="${host_list[0]%%:*}"
+        first_p="${host_list[0]##*:}"
+        [[ "$first_h" == "$first_p" ]] && first_p="$port"
+        selected_target="$first_h:$first_p"
+      fi
+    elif [[ ${#host_list[@]} -eq 1 ]]; then
+      first_h="${host_list[0]%%:*}"
+      first_p="${host_list[0]##*:}"
+      [[ "$first_h" == "$first_p" ]] && first_p="$port"
+      selected_target="$first_h:$first_p"
+    fi
+
+    if [[ -n "$selected_target" ]]; then
+      args=(systemd-run --system "--unit=$UNIT" --property=Type=notify --description=Omarchy\ FortiVPN "$vpn" "$selected_target" -c "$CONF")
+    else
+      args=(systemd-run --system "--unit=$UNIT" --property=Type=notify --description=Omarchy\ FortiVPN "$vpn" -c "$CONF")
+    fi
     [[ ${2:-} != "" ]] && args+=("--otp=$2")
     exec "${args[@]}"
     ;;
   stop)
     [[ $# == 1 ]] || fail "Usage: stop"
-    exec systemctl stop "$UNIT.service"
+    if systemctl stop "$UNIT.service" 2>&1; then
+      exit 0
+    fi
+    # stop failed — verify the unit is actually down before reporting success.
+    unit_state=$(systemctl is-active "$UNIT.service" 2>&1) || true
+    case "$unit_state" in
+      inactive|failed) exit 0 ;;   # unit is conclusively down
+      active|activating) fail "Failed to stop the VPN unit." ;;
+      *) fail "Could not verify VPN state after stop: $unit_state" ;;
+    esac
     ;;
   *)
     fail "Usage: omarchy-fortivpn-helper {write|reset|journal|status|start|stop}"
