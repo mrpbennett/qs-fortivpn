@@ -9,8 +9,13 @@ SUDOERS=/etc/sudoers.d/omarchy-fortivpn
 if [[ ${1:-} == --install-root ]]; then
   # pkexec sets PKEXEC_UID to the authenticated caller; it cannot be forged.
   [[ $# == 1 && ${PKEXEC_UID:-} =~ ^[1-9][0-9]*$ ]] || { printf '%s\n' "Run this installer through pkexec as your desktop user." >&2; exit 1; }
-  user=$(id -un -- "$PKEXEC_UID")
+  # getent resolves an all-digit key strictly as a UID, never as a user name.
+  user=$(getent passwd "$PKEXEC_UID" | cut -d: -f1) || user=""
   [[ $user =~ ^[a-z_][a-z0-9_-]*\$?$ ]] || { printf '%s\n' "Invalid user name." >&2; exit 1; }
+  # Serialize installs system-wide: overlapping runs would back up each
+  # other's files and a failed run could roll back a successful one.
+  exec 9> /run/omarchy-fortivpn-install.lock
+  flock -n 9 || { printf '%s\n' "Another FortiVPN setup is already running." >&2; exit 1; }
   script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   install -d -o root -g root -m 755 "${HELPER%/*}" "${CLI%/*}" "${SUDOERS%/*}"
   bash -n "$script_dir/omarchy-fortivpn-helper"

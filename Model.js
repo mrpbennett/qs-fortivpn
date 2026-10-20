@@ -40,14 +40,15 @@ function localPath(url) {
 }
 
 // True when the installed controller is older than the one this plugin
-// ships. Newer or unparsable versions never trigger an update offer.
+// ships. Newer or malformed versions never trigger an update offer.
 function controllerUpdateAvailable(installedVersion) {
-  var installed = String(installedVersion || "").split(".")
+  var text = String(installedVersion || "")
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(text)) return false
+  var installed = text.split(".")
   var shipped = CONTROLLER_VERSION.split(".")
   for (var i = 0; i < shipped.length; i++) {
-    var a = parseInt(installed[i] || "0", 10)
+    var a = parseInt(installed[i], 10)
     var b = parseInt(shipped[i], 10)
-    if (!isFinite(a)) return false
     if (a !== b) return a < b
   }
   return false

@@ -202,7 +202,7 @@ Panel {
                 ToggleSwitch {
                   visible: service.canDisconnect || service.state === "disconnecting" || (service.installed && service.configured)
                   checked: service.connected || service.state === "connecting"
-                  busy: service.busy || service.state === "disconnecting"
+                  busy: service.lifecycleBusy || service.state === "disconnecting"
                   foreground: hero.foreground
                   onToggled: {
                     if (service.canDisconnect) service.disconnect()
