@@ -55,6 +55,9 @@ assert(model.controllerUpdateAvailable("0.9.9"), "an older major/minor controlle
 assert(!model.controllerUpdateAvailable(model.CONTROLLER_VERSION), "the shipped controller must not offer an update");
 assert(!model.controllerUpdateAvailable(newer), "a newer controller must not offer a downgrade");
 assert(!model.controllerUpdateAvailable("garbage"), "an unparsable version must not offer an update");
+assert(!model.controllerUpdateAvailable("1.1oops.0"), "a version with a malformed component must not offer an update");
+assert(!model.controllerUpdateAvailable("1.1"), "a version missing components must not offer an update");
+assert(!model.controllerUpdateAvailable(""), "a missing version must not offer an update");
 
 const helperSource = fs.readFileSync(path.join(__dirname, "..", "scripts", "omarchy-fortivpn-helper"), "utf8");
 assert(helperSource.includes(`CONTROLLER_VERSION=${model.CONTROLLER_VERSION}\n`),

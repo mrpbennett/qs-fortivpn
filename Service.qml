@@ -39,18 +39,18 @@ Item {
 
   readonly property bool configured: configState === "ready"
   readonly property bool connected: state === "connected"
-  readonly property bool busy: statusProcess.running || startProcess.running ||
-    stopProcess.running || journalProcess.running || writeProcess.running || resetFailedProcess.running ||
-    installProcess.running
+  readonly property bool lifecycleBusy: statusProcess.running || startProcess.running ||
+    stopProcess.running || journalProcess.running || writeProcess.running || resetFailedProcess.running
+  readonly property bool busy: lifecycleBusy || installProcess.running
   readonly property bool canInstall: !busy && state !== "connecting" && state !== "disconnecting"
   // An older but interface-compatible controller keeps working; this only
   // drives a non-blocking update offer.
   readonly property bool updateAvailable: installed && Model.controllerUpdateAvailable(controllerVersion)
   readonly property bool canConfigure: installed && !busy
   readonly property bool canConnect: installed && controllerCode === "ready" && configured && !busy && state !== "connected" && state !== "connecting"
-  // Stop remains available during a controller upgrade so an outdated widget
-  // cannot strand an active tunnel.
-  readonly property bool canDisconnect: !busy && (state === "connected" || state === "connecting" || !installed)
+  // Stop remains available during a controller upgrade (including while its
+  // polkit prompt is open) so an update cannot strand an active tunnel.
+  readonly property bool canDisconnect: !lifecycleBusy && (state === "connected" || state === "connecting" || !installed)
 
   signal passwordSaved()
   signal passwordForgotten()
@@ -70,6 +70,7 @@ Item {
   property string _resetStderr: ""
   property string _installStdout: ""
   property string _installStderr: ""
+  property bool _refreshQueued: false
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -91,7 +92,12 @@ Item {
   }
 
   function refreshStatus() {
-    if (statusProcess.running) return
+    // A poll already in flight may predate the change that requested this
+    // one, so run another as soon as it finishes instead of dropping it.
+    if (statusProcess.running) {
+      _refreshQueued = true
+      return
+    }
     refreshing = true
     _statusOutput = ""
     statusProcess.command = Model.statusCommand()
@@ -285,6 +291,10 @@ Item {
     onExited: function(exitCode) {
       root._handleStatus(exitCode === 0 ? root._statusOutput : "")
       root.refreshing = false
+      if (root._refreshQueued) {
+        root._refreshQueued = false
+        Qt.callLater(root.refreshStatus)
+      }
     }
   }
 
