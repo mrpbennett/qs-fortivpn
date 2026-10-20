@@ -13,7 +13,7 @@ usage() {
 controller_status() {
   local interface
   CONTROLLER_OUTPUT=$(sudo -n "$HELPER" status) || {
-    printf '%s\n' "FortiVPN controller needs installation or update. Run ./scripts/install-passwordless-helper.sh from the plugin directory." >&2
+    printf '%s\n' "FortiVPN controller needs installation or update. Use Set up in the FortiVPN panel, or run ./scripts/install-passwordless-helper.sh from the plugin directory." >&2
     return 1
   }
   interface=$(status_field interfaceVersion) || {
@@ -25,7 +25,7 @@ controller_status() {
     return 1
   }
   [[ $interface == "$CONTROLLER_INTERFACE_VERSION" ]] || {
-    printf '%s\n' "FortiVPN controller interface is incompatible. Run ./scripts/install-passwordless-helper.sh from the plugin directory." >&2
+    printf '%s\n' "FortiVPN controller interface is incompatible. Use Set up in the FortiVPN panel, or run ./scripts/install-passwordless-helper.sh from the plugin directory." >&2
     return 1
   }
 }

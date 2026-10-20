@@ -24,7 +24,7 @@ Panel {
 
   readonly property string statusText: {
     if (!service.checkedInstalled) return "Checking…"
-    if (!service.installed) return "Controller update required"
+    if (!service.installed) return "Setup required"
     if (service.controllerCode === "dependency_missing") return "openfortivpn missing"
     if (service.controllerCode === "config_invalid") return "Configuration needs repair"
     if (service.pendingTrustDigest !== "") return "Unrecognized certificate"
@@ -228,25 +228,41 @@ Panel {
             wrapMode: Text.WordWrap
           }
 
+          // Missing/incompatible controller blocks everything; an older
+          // compatible one only gets a non-blocking update offer.
           CursorSurface {
-            visible: service.checkedInstalled && !service.installed
+            visible: service.checkedInstalled && (!service.installed || service.updateAvailable)
             width: parent.width
-            implicitHeight: missingText.implicitHeight + Style.spacing.rowPaddingX
+            implicitHeight: setupColumn.implicitHeight + Style.spacing.rowPaddingX
             foreground: root.foreground
 
-            Text {
-              id: missingText
+            Column {
+              id: setupColumn
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               anchors.margins: Style.space(12)
-            text: service.controllerCode === "dependency_missing"
-              ? service.controllerMessage + " Install it with: sudo pacman -S openfortivpn"
-              : service.controllerMessage + " Run ./scripts/install-passwordless-helper.sh after updating the plugin."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
+              spacing: Style.space(8)
+
+              Text {
+                width: parent.width
+                text: service.installed
+                  ? "A FortiVPN system helper update is available."
+                  : service.controllerMessage + " You'll be asked for your password once."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+              }
+
+              Button {
+                text: service.installed ? "Update FortiVPN" : "Set up FortiVPN"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                enabled: service.canInstall
+                onClicked: service.installController()
+              }
             }
           }
 

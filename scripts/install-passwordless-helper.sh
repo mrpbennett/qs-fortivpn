@@ -7,7 +7,10 @@ CLI=/usr/local/bin/omarchy-fortivpn
 SUDOERS=/etc/sudoers.d/omarchy-fortivpn
 
 if [[ ${1:-} == --install-root ]]; then
-  [[ $# == 2 && $2 =~ ^[a-z_][a-z0-9_-]*\$?$ ]] || { printf '%s\n' "Invalid user name." >&2; exit 1; }
+  # pkexec sets PKEXEC_UID to the authenticated caller; it cannot be forged.
+  [[ $# == 1 && ${PKEXEC_UID:-} =~ ^[1-9][0-9]*$ ]] || { printf '%s\n' "Run this installer through pkexec as your desktop user." >&2; exit 1; }
+  user=$(id -un -- "$PKEXEC_UID")
+  [[ $user =~ ^[a-z_][a-z0-9_-]*\$?$ ]] || { printf '%s\n' "Invalid user name." >&2; exit 1; }
   script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   install -d -o root -g root -m 755 "${HELPER%/*}" "${CLI%/*}" "${SUDOERS%/*}"
   bash -n "$script_dir/omarchy-fortivpn-helper"
@@ -40,7 +43,7 @@ if [[ ${1:-} == --install-root ]]; then
   install -o root -g root -m 755 "$script_dir/omarchy-fortivpn" "$cli_tmp"
   "$helper_tmp" status >/dev/null
   printf '%s ALL=(root) NOPASSWD: %s reset, %s journal *, %s status, %s stop, %s start, %s start *\n' \
-    "$2" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" > "$sudoers_tmp"
+    "$user" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" > "$sudoers_tmp"
   chown root:root "$sudoers_tmp"
   chmod 440 "$sudoers_tmp"
   visudo -cf "$sudoers_tmp"
@@ -49,10 +52,10 @@ if [[ ${1:-} == --install-root ]]; then
   mv -f "$sudoers_tmp" "$SUDOERS"
   "$HELPER" status >/dev/null
   committed=true
-  printf '%s\n' "Installed and verified FortiVPN controller for $2."
+  printf '%s\n' "Installed and verified FortiVPN controller for $user."
   exit 0
 fi
 
 [[ $EUID != 0 ]] || { printf '%s\n' "Run this installer as your normal desktop user." >&2; exit 1; }
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-exec pkexec /usr/bin/bash "$script_dir/install-passwordless-helper.sh" --install-root "$(id -un)"
+exec pkexec /usr/bin/bash "$script_dir/install-passwordless-helper.sh" --install-root
