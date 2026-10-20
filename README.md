@@ -81,13 +81,15 @@ plain backgrounded process:
 
 ## Passwordless Privilege Model
 
-Run the one-time installer after installing or updating the plugin:
+The first time you open the panel, click **Set up FortiVPN**. When a plugin
+update ships a newer helper, the panel offers **Update FortiVPN** instead.
+Without a desktop session (e.g. over SSH), run the same installer directly:
 
 ```sh
 ./scripts/install-passwordless-helper.sh
 ```
 
-It prompts once through polkit to install a root-owned helper at
+Either way it prompts once through polkit to install a root-owned helper at
 `/usr/local/libexec/omarchy-fortivpn-helper` and a mode-`440` sudoers rule.
 That rule permits only the helper's status, start, stop, reset, and constrained
 journal actions to run without a password. Status reports non-secret readiness
@@ -120,8 +122,7 @@ omarchy-fortivpn stop
 omarchy-fortivpn status         # non-secret readiness diagnostics
 ```
 
-Run `./scripts/install-passwordless-helper.sh` again after updating the plugin
-so it installs or updates this command. A full-tunnel VPN may interrupt the
+The panel's setup/update button installs or updates this command too. A full-tunnel VPN may interrupt the
 SSH session that started it when its routes take effect; the systemd service
 continues running and can be stopped in a later session.
 
@@ -132,12 +133,13 @@ mkdir -p ~/.config/omarchy/plugins
 ln -s "$(pwd)" ~/.config/omarchy/plugins/mrpbennett.fortivpn
 omarchy plugin enable mrpbennett.fortivpn
 omarchy bar move mrpbennett.fortivpn --section right   # optional
-./scripts/install-passwordless-helper.sh
 ```
 
-Editing files under the symlinked plugin directory hot-reloads in the
-running shell — no restart needed. If a change doesn't pick up, force it
-with `omarchy-shell shell rescanPlugins`.
+Then open the panel and click **Set up FortiVPN**.
+
+Omarchy runs the shell with Quickshell's file watching disabled, so code
+changes under the symlinked plugin directory load only after
+`omarchy-restart-shell` (`omarchy-shell shell rescanPlugins` is not enough).
 
 ## First connection
 

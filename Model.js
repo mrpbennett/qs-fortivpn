@@ -3,6 +3,10 @@
 var UNIT_NAME = "omarchy-fortivpn"
 var HELPER_PATH = "/usr/local/libexec/omarchy-fortivpn-helper"
 var CONTROLLER_INTERFACE_VERSION = "1"
+// The controller release this plugin ships in scripts/. An older installed
+// controller still works if the interface matches, but the panel offers an
+// update.
+var CONTROLLER_VERSION = "1.2.0"
 
 // Strips anything that could break out of a single "key = value" config
 // line (or a stdin read) so a stray newline in a form field can never
@@ -21,6 +25,32 @@ function sanitizeSecret(value) {
 // over stdin so passwords never appear in the process list.
 function configWriteCommand(keys) {
   return ["pkexec", HELPER_PATH, "write"].concat(keys)
+}
+
+// Installs or updates the root-owned controller from this plugin's scripts/.
+// pkexec shows the standard polkit admin prompt; the installer reads the
+// target user from pkexec's PKEXEC_UID, so no user name is passed here.
+function installCommand(scriptPath) {
+  return ["pkexec", "/usr/bin/bash", scriptPath, "--install-root"]
+}
+
+// Qt.resolvedUrl() yields a file:// URL; processes need a plain path.
+function localPath(url) {
+  return decodeURIComponent(String(url).replace(/^file:\/\//, ""))
+}
+
+// True when the installed controller is older than the one this plugin
+// ships. Newer or unparsable versions never trigger an update offer.
+function controllerUpdateAvailable(installedVersion) {
+  var installed = String(installedVersion || "").split(".")
+  var shipped = CONTROLLER_VERSION.split(".")
+  for (var i = 0; i < shipped.length; i++) {
+    var a = parseInt(installed[i] || "0", 10)
+    var b = parseInt(shipped[i], 10)
+    if (!isFinite(a)) return false
+    if (a !== b) return a < b
+  }
+  return false
 }
 
 function statusCommand() {
@@ -118,6 +148,10 @@ if (typeof module !== "undefined") {
   module.exports = {
     UNIT_NAME: UNIT_NAME,
     CONTROLLER_INTERFACE_VERSION: CONTROLLER_INTERFACE_VERSION,
+    CONTROLLER_VERSION: CONTROLLER_VERSION,
+    installCommand: installCommand,
+    localPath: localPath,
+    controllerUpdateAvailable: controllerUpdateAvailable,
     sanitizeField: sanitizeField,
     sanitizeSecret: sanitizeSecret,
     configWriteCommand: configWriteCommand,

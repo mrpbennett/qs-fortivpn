@@ -18,7 +18,8 @@ Item {
   property bool installed: false
   property bool checkedInstalled: false
   property string controllerCode: "incompatible"
-  property string controllerMessage: "FortiVPN controller needs installation or update."
+  property string controllerMessage: "FortiVPN needs a one-time setup before it can manage the VPN."
+  property string controllerVersion: ""
   property string configState: "missing"
   // disconnected | connecting | connected | disconnecting | failed
   property string state: "disconnected"
@@ -39,7 +40,12 @@ Item {
   readonly property bool configured: configState === "ready"
   readonly property bool connected: state === "connected"
   readonly property bool busy: statusProcess.running || startProcess.running ||
-    stopProcess.running || journalProcess.running || writeProcess.running || resetFailedProcess.running
+    stopProcess.running || journalProcess.running || writeProcess.running || resetFailedProcess.running ||
+    installProcess.running
+  readonly property bool canInstall: !busy && state !== "connecting" && state !== "disconnecting"
+  // An older but interface-compatible controller keeps working; this only
+  // drives a non-blocking update offer.
+  readonly property bool updateAvailable: installed && Model.controllerUpdateAvailable(controllerVersion)
   readonly property bool canConfigure: installed && !busy
   readonly property bool canConnect: installed && controllerCode === "ready" && configured && !busy && state !== "connected" && state !== "connecting"
   // Stop remains available during a controller upgrade so an outdated widget
@@ -62,6 +68,8 @@ Item {
   property string _stopStderr: ""
   property string _resetStdout: ""
   property string _resetStderr: ""
+  property string _installStdout: ""
+  property string _installStderr: ""
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -173,6 +181,19 @@ Item {
     })
   }
 
+  // Runs this plugin's installer through pkexec. Only ever called from an
+  // explicit click so an admin prompt never appears unprompted.
+  function installController() {
+    if (!canInstall) return
+    lastError = ""
+    actionStatus = installed ? "Updating FortiVPN…" : "Setting up FortiVPN…"
+    _installStdout = ""
+    _installStderr = ""
+    installProcess.command = Model.installCommand(
+      Model.localPath(Qt.resolvedUrl("scripts/install-passwordless-helper.sh")))
+    installProcess.running = true
+  }
+
   function _runWrite(keys, values, onSuccessFn) {
     writeProcess.onSuccess = onSuccessFn
     writeProcess._payload = values.join("\n") + "\n"
@@ -186,7 +207,8 @@ Item {
     if (!status) {
       installed = false
       controllerCode = "incompatible"
-      controllerMessage = "FortiVPN controller needs installation or update."
+      controllerMessage = "FortiVPN needs a one-time setup before it can manage the VPN."
+      controllerVersion = ""
       configState = "missing"
       state = "disconnected"
       return
@@ -194,6 +216,7 @@ Item {
     installed = true
     controllerCode = status.code
     controllerMessage = status.message
+    controllerVersion = status.controllerVersion
     configState = status.configState
     var next = Model.normalizeActiveState(status.unitState)
     var enteredFailed = next === "failed" && state !== "failed"
@@ -332,6 +355,27 @@ Item {
         root.actionStatus = ""
         root.lastError = Model.sanitizeField(root._stopStderr || root._stopStdout)
           || "Failed to disconnect the VPN."
+      }
+      delayedRefresh.restart()
+    }
+  }
+
+  Process {
+    id: installProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: installStdout; waitForEnd: true; onStreamFinished: root._installStdout = text }
+    stderr: StdioCollector { id: installStderr; waitForEnd: true; onStreamFinished: root._installStderr = text }
+    onExited: function(exitCode) {
+      root.actionStatus = ""
+      if (exitCode === 0) {
+        root.actionStatus = "FortiVPN is set up."
+      } else if (exitCode === 126) {
+        // pkexec: the authentication dialog was dismissed.
+        root.lastError = "Setup was canceled."
+      } else {
+        root.lastError = Model.parseFailureSummary(root._installStderr || root._installStdout)
+          || "FortiVPN setup failed."
       }
       delayedRefresh.restart()
     }
