@@ -5,18 +5,17 @@ const fs = require("fs");
 const assert = require("assert");
 const path = require("path");
 
-// ---- load Model.js without QML runtime ----
+// ---- load functions directly from Model.js (no QML runtime) ----
 const src = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8");
 
-function sanitizeField(v) { return String(v == null ? "" : v).replace(/[\r\n]/g, "").trim(); }
-function isValidHost(h) { if (!h || h.length > 255) return false; return /^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(h) && !/\.\./.test(h); }
-function isValidPort(p) { if (!/^[0-9]{1,5}$/.test(p)) return false; const n = parseInt(p, 10); return n >= 1 && n <= 65535; }
-var MAX_GATEWAYS = 5;
-
-// Extract parseGateways definition and eval it (avoids needing QML engine).
+// Extract all needed functions and constants from Model.js via eval so the
+// test stays in sync with the real code and never drifts.
+const preamble = src.match(/function sanitizeField[\s\S]*?var MAX_GATEWAYS\s*=\s*\d+/);
+if (!preamble) { console.error("Could not extract validators from Model.js"); process.exit(1); }
 const body = src.match(/function parseGateways[\s\S]*?\n\}/);
 if (!body) { console.error("Could not find parseGateways in Model.js"); process.exit(1); }
-eval(body[0]); // defines parseGateways in this scope
+eval(preamble[0]);
+eval(body[0]);
 
 let passed = 0, failed = 0;
 function test(name, fn) {

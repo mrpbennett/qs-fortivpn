@@ -150,13 +150,20 @@ write_config() {
         [[ $_valid_count -le 5 ]] || fail "Too many gateways (max 5)."
         # Persist normalized hosts (protocols/paths stripped).
         values[i]=$(IFS=', '; echo "${_normalized[*]}")
-        # If realm was extracted from URL path and a realm key is present, fill it.
+        # If realm was extracted from URL path, fill the existing realm key
+        # or append one so 3-key writes (host port username) don't drop it.
         if [[ -n "$_extracted_realm" ]]; then
+          local _found_realm=false
           for _ri in "${!keys[@]}"; do
-            if [[ ${keys[_ri]} == "realm" && -z "${values[_ri]}" ]]; then
-              values[_ri]="$_extracted_realm"
+            if [[ ${keys[_ri]} == "realm" ]]; then
+              [[ -z "${values[_ri]}" ]] && values[_ri]="$_extracted_realm"
+              _found_realm=true
             fi
           done
+          if [[ $_found_realm == false ]]; then
+            keys+=("realm")
+            values+=("$_extracted_realm")
+          fi
         fi
         ;;
       port)
@@ -221,6 +228,7 @@ case "${1:-}" in
     if [[ ${#host_list[@]} -gt 5 ]]; then
       fail "Too many gateways configured (max 5)."
     fi
+    selected_target=""
     if [[ ${#host_list[@]} -gt 1 ]]; then
       # Overall probe deadline (seconds) so a long unreachable list
       # cannot delay connection startup indefinitely.
